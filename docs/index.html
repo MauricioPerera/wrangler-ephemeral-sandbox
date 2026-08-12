@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ephemeral Sandbox — un sandbox que se autodestruye solo</title>
+<meta name="description" content="Un espacio efímero para que un agente ejecute JavaScript vía HTTP, aislado en un intérprete QuickJS-WASM, con memoria D1 real. Se despliega en segundos con wrangler --temporary y se autodestruye solo en ~1 hora.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧪</text></svg>">
+<style>
+  :root {
+    --bg: #0a0b12;
+    --text: #eef0ff;
+    --muted: #9aa0c0;
+    --primary: #7c3aed;
+    --primary2: #ec4899;
+    --accent: #22d3ee;
+    --card: rgba(255,255,255,0.045);
+    --border: rgba(255,255,255,0.09);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overflow-x: hidden;
+  }
+  #bg-canvas { position: fixed; inset: 0; z-index: 0; display: block; }
+  .content { position: relative; z-index: 1; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(10px);
+    background: rgba(10,11,18,0.55);
+    border-bottom: 1px solid var(--border);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 12px var(--accent); }
+  nav a.navlink { color: var(--muted); text-decoration: none; font-size: 13.5px; margin-left: 22px; }
+  nav a.navlink:hover { color: var(--text); }
+  .lang-switch { display: inline-flex; gap: 4px; margin-left: 22px; background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 3px; vertical-align: middle; }
+  .lang-btn { border: none; background: transparent; color: var(--muted); font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; cursor: pointer; font-family: inherit; }
+  .lang-btn.active { background: linear-gradient(100deg, var(--primary), var(--primary2)); color: #0a0b12; }
+  @media (max-width: 700px) { nav .navlinks-desktop { display: none; } }
+
+  .hero {
+    min-height: 88vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center;
+    padding: 100px 24px 60px;
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px; border-radius: 999px;
+    background: var(--card); border: 1px solid var(--border);
+    font-size: 12.5px; color: var(--muted);
+    margin-bottom: 28px;
+  }
+  .eyebrow .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+  h1.hero-title { font-size: clamp(38px, 7vw, 76px); line-height: 1.04; margin: 0 0 18px; font-weight: 800; letter-spacing: -0.02em; }
+  h1.hero-title .grad {
+    background: linear-gradient(100deg, var(--primary), var(--primary2) 55%, var(--accent));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero-sub { max-width: 640px; color: var(--muted); font-size: 17px; line-height: 1.6; margin: 0 0 36px; }
+  .cta-row { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 24px; border-radius: 12px;
+    font-weight: 600; font-size: 14.5px; text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform .15s ease, opacity .15s ease;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn-primary { background: linear-gradient(100deg, var(--primary), var(--primary2)); color: #0a0b12; }
+  .btn-ghost { background: var(--card); border-color: var(--border); color: var(--text); }
+
+  .countdown-chip {
+    margin-top: 44px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px; color: var(--accent);
+    background: var(--card); border: 1px solid var(--border);
+    padding: 10px 18px; border-radius: 999px;
+  }
+
+  section { padding: 90px 0; }
+  .section-head { text-align: center; max-width: 640px; margin: 0 auto 52px; }
+  .section-tag { color: var(--accent); font-size: 12.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 12px; }
+  .section-title { font-size: clamp(26px, 4vw, 38px); font-weight: 800; margin: 0 0 14px; letter-spacing: -0.01em; }
+  .section-sub { color: var(--muted); font-size: 15.5px; line-height: 1.65; }
+
+  .grid { display: grid; gap: 18px; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 820px) { .grid-3 { grid-template-columns: 1fr; } }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 26px; }
+  .card .icon { font-size: 26px; margin-bottom: 14px; display: block; }
+  .card h3 { margin: 0 0 8px; font-size: 16.5px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+
+  .steps { counter-reset: step; display: flex; flex-direction: column; gap: 0; max-width: 720px; margin: 0 auto; }
+  .step { counter-increment: step; display: flex; gap: 20px; padding: 24px 0; border-top: 1px solid var(--border); }
+  .step:last-child { border-bottom: 1px solid var(--border); }
+  .step::before {
+    content: counter(step); flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--primary), var(--primary2)); color: #0a0b12; font-weight: 800;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+  }
+  .step h4 { margin: 3px 0 6px; font-size: 15.5px; }
+  .step p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+  .step code {
+    display: block; margin-top: 10px; background: #05060c; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    color: var(--accent); overflow-x: auto; white-space: pre;
+  }
+
+  .usecases { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .pill { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 10px 18px; font-size: 13.5px; color: var(--text); }
+
+  .cta-band {
+    text-align: center;
+    background: linear-gradient(180deg, transparent, rgba(124,58,237,0.08));
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+
+  footer { padding: 50px 0 70px; text-align: center; color: var(--muted); font-size: 13px; }
+  footer a { color: var(--muted); }
+  footer .foot-links { display: flex; gap: 18px; justify-content: center; margin-bottom: 18px; flex-wrap: wrap; }
+  footer .foot-links a { text-decoration: none; }
+  footer .foot-links a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<div class="content">
+  <nav>
+    <div class="wrap">
+      <div class="brand"><span class="dot"></span> Ephemeral Sandbox</div>
+      <div>
+        <span class="navlinks-desktop">
+          <a class="navlink" href="#why" id="nav-why">Por qué</a>
+          <a class="navlink" href="#features" id="nav-features">Funcionalidades</a>
+          <a class="navlink" href="#how" id="nav-how">Cómo funciona</a>
+          <a class="navlink" href="https://github.com/MauricioPerera/wrangler-ephemeral-sandbox">GitHub</a>
+        </span>
+        <span class="lang-switch" id="lang-switch">
+          <button class="lang-btn" data-lang="es">ES</button>
+          <button class="lang-btn" data-lang="en">EN</button>
+          <button class="lang-btn" data-lang="pt">PT</button>
+        </span>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="eyebrow"><span class="pulse"></span> <span id="hero-eyebrow">Corre sobre cuentas temporales de Cloudflare</span></div>
+    <h1 class="hero-title" id="hero-title">Un sandbox que<br><span class="grad">se autodestruye solo.</span></h1>
+    <p class="hero-sub" id="hero-sub">
+      Un espacio efímero para que un <b>agente</b> ejecute JavaScript vía HTTP — aislado de verdad en un
+      intérprete QuickJS compilado a WASM, con memoria persistente en D1. Sin login, sin Docker.
+      <code>wrangler deploy --temporary</code> lo levanta en segundos y desaparece solo en ~1 hora.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://deploy.workers.cloudflare.com/?url=https://github.com/MauricioPerera/wrangler-ephemeral-sandbox" target="_blank" rel="noopener">🚀 Deploy to Cloudflare</a>
+      <a class="btn btn-ghost" href="https://github.com/MauricioPerera/wrangler-ephemeral-sandbox" target="_blank" rel="noopener" id="hero-cta-ghost">Ver código en GitHub</a>
+    </div>
+    <div class="countdown-chip" id="hero-countdown">⏳ se autodestruye en 59:59</div>
+  </header>
+
+  <section id="why">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="section-tag" id="why-tag">Por qué existe</div>
+        <h2 class="section-title" id="why-title">Un agente necesita un lugar seguro para probar código</h2>
+        <p class="section-sub" id="why-sub">
+          Cloudflare bloquea `eval`/`new Function` en producción, y su alternativa oficial (Dynamic Workers)
+          requiere plan pago. La única forma real de dar aislamiento en una cuenta gratuita/temporal es
+          correr un intérprete completo compilado a WASM adentro del propio Worker.
+        </p>
+      </div>
+      <div class="grid grid-3">
+        <div class="card">
+          <span class="icon">⚡</span>
+          <h3 id="why-c1-h">Cero fricción</h3>
+          <p id="why-c1-p">Sin crear cuenta, sin login, sin Docker. Un comando y tenés un endpoint HTTP listo para tu agente.</p>
+        </div>
+        <div class="card">
+          <span class="icon">🔒</span>
+          <h3 id="why-c2-h">Aislamiento real</h3>
+          <p id="why-c2-p">No es una lista negra de nombres bloqueados — el código corre en un QuickJS-WASM que directamente no tiene <code>fetch</code> ni acceso a los bindings del Worker.</p>
+        </div>
+        <div class="card">
+          <span class="icon">🧹</span>
+          <h3 id="why-c3-h">Se limpia solo</h3>
+          <p id="why-c3-p">Nada que recordar borrar. Pasada la hora, Cloudflare elimina la cuenta temporal y todo lo que contiene.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="section-tag" id="feat-tag">Funcionalidades</div>
+        <h2 class="section-title" id="feat-title">Lo justo para que un agente ejecute y recuerde</h2>
+        <p class="section-sub" id="feat-sub">API HTTP simple: una sesión por token, un Durable Object propio, y una D1 compartida para memoria.</p>
+      </div>
+      <div class="grid grid-3">
+        <div class="card"><span class="icon">🧩</span><h3 id="feat-1-h">Ejecución aislada</h3><p id="feat-1-p">JavaScript corriendo dentro de QuickJS compilado a WASM, no vía eval del Worker.</p></div>
+        <div class="card"><span class="icon">🚫</span><h3 id="feat-2-h">Sin red desde el código</h3><p id="feat-2-p"><code>typeof fetch</code> adentro del sandbox devuelve <code>undefined</code> — no hay APIs de red para empezar.</p></div>
+        <div class="card"><span class="icon">⏱️</span><h3 id="feat-3-h">Protección contra loops infinitos</h3><p id="feat-3-p">Corta por pasos de intérprete, no por deadline — un <code>while(true){}</code> se corta en ~1-2 segundos.</p></div>
+        <div class="card"><span class="icon">🗂️</span><h3 id="feat-4-h">Historial por sesión</h3><p id="feat-4-p">Cada ejecución queda guardada en el SQLite propio de esa sesión — código, resultado, logs y errores.</p></div>
+        <div class="card"><span class="icon">💾</span><h3 id="feat-5-h">Memoria con D1</h3><p id="feat-5-p">Una base D1 real, auto-provisionada al desplegar, para que el agente guarde datos entre pasos y entre sesiones.</p></div>
+        <div class="card"><span class="icon">🌐</span><h3 id="feat-6-h">API HTTP simple</h3><p id="feat-6-p"><code>POST /new</code>, <code>POST /exec</code>, <code>POST /db/query</code> — nada que aprender, cualquier agente lo llama con <code>fetch</code>.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="section-tag" id="how-tag">Cómo funciona</div>
+        <h2 class="section-title" id="how-title">De cero a ejecutando código en menos de un minuto</h2>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div>
+            <h4 id="how-1-h">Cloná el repo</h4>
+            <p id="how-1-p">No hace falta tener cuenta de Cloudflare ni estar logueado.</p>
+            <code>git clone https://github.com/MauricioPerera/wrangler-ephemeral-sandbox.git
+cd wrangler-ephemeral-sandbox && npm install</code>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h4 id="how-2-h">Desplegá con --temporary</h4>
+            <p id="how-2-p">Wrangler crea una cuenta desechable, provisiona la D1 sola, despliega el Worker y te da la URL pública.</p>
+            <code>npx wrangler deploy --temporary</code>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h4 id="how-3-h">Creá una sesión y ejecutá</h4>
+            <p id="how-3-p">Tu agente hace <code>POST /new</code> una vez, y después <code>POST /s/&lt;token&gt;/exec</code> con el código a correr.</p>
+            <code>curl -X POST $URL/s/&lt;token&gt;/exec \
+  -d '{"code":"return 21*2"}'</code>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h4 id="how-4-h">¿Te gustó? Quedátelo</h4>
+            <p id="how-4-p">Wrangler también te da una <em>claim URL</em>. Abrila y logueate antes de que venza la hora
+            y el Worker pasa a tu cuenta real, para siempre. Si no hacés nada, se borra solo.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-band">
+    <div class="wrap section-head" style="margin-bottom:32px;">
+      <div class="section-tag" id="uc-tag">Casos de uso</div>
+      <h2 class="section-title" id="uc-title">¿Para qué sirve esto en la práctica?</h2>
+    </div>
+    <div class="wrap">
+      <div class="usecases">
+        <span class="pill" id="uc-1">Herramienta de ejecución de código para un LLM</span>
+        <span class="pill" id="uc-2">Probar snippets rápido sin instalar Node</span>
+        <span class="pill" id="uc-3">Ejecutar código generado por un agente de forma segura</span>
+        <span class="pill" id="uc-4">Calculadora aislada para razonamiento paso a paso</span>
+        <span class="pill" id="uc-5">Prototipar lógica antes de escribirla en el proyecto real</span>
+        <span class="pill" id="uc-6">Aprender Durable Objects + WebAssembly</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <div class="foot-links">
+        <a href="https://github.com/MauricioPerera/wrangler-ephemeral-sandbox" target="_blank" rel="noopener" id="foot-1">Repositorio</a>
+        <a href="https://github.com/MauricioPerera/wrangler-ephemeral-sandbox/blob/master/AGENTS.md" target="_blank" rel="noopener" id="foot-2">Guía para agentes</a>
+        <a href="https://developers.cloudflare.com/workers/platform/claim-deployments/" target="_blank" rel="noopener" id="foot-3">Docs: cuentas temporales</a>
+        <a href="https://developers.cloudflare.com/durable-objects/" target="_blank" rel="noopener" id="foot-4">Docs: Durable Objects</a>
+      </div>
+      <span id="foot-note">No afiliado con Cloudflare. Hecho con <code>wrangler deploy --temporary</code>.</span>
+    </div>
+  </footer>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+(function () {
+  var canvas = document.getElementById('bg-canvas');
+  var renderer, scene, camera, particles;
+  var mouseX = 0, mouseY = 0;
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function init() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.z = 14;
+
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    var COUNT = window.innerWidth < 700 ? 260 : 620;
+    var positions = new Float32Array(COUNT * 3);
+    var speeds = new Float32Array(COUNT);
+    var colorChoices = [
+      new THREE.Color(0x7c3aed),
+      new THREE.Color(0xec4899),
+      new THREE.Color(0x22d3ee),
+    ];
+    var colors = new Float32Array(COUNT * 3);
+
+    for (var i = 0; i < COUNT; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 34;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 20;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 20;
+      speeds[i] = 0.15 + Math.random() * 0.35;
+      var c = colorChoices[i % colorChoices.length];
+      colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
+    }
+
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    var mat = new THREE.PointsMaterial({
+      size: 0.09, vertexColors: true, transparent: true, opacity: 0.85,
+      depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+
+    particles = new THREE.Points(geo, mat);
+    particles.userData.speeds = speeds;
+    scene.add(particles);
+
+    window.addEventListener('resize', onResize);
+    window.addEventListener('mousemove', onMouseMove);
+    animate();
+  }
+
+  function onResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  function onMouseMove(e) {
+    mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
+    mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+  }
+
+  var clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    var t = clock.getElapsedTime();
+    var pos = particles.geometry.attributes.position;
+    var speeds = particles.userData.speeds;
+
+    for (var i = 0; i < pos.count; i++) {
+      var y = pos.getY(i);
+      y += speeds[i] * 0.01;
+      if (y > 10) y = -10;
+      pos.setY(i, y);
+    }
+    pos.needsUpdate = true;
+
+    particles.rotation.y = t * 0.02;
+    camera.position.x += (mouseX * 1.5 - camera.position.x) * 0.02;
+    camera.position.y += (-mouseY * 1.0 - camera.position.y) * 0.02;
+    camera.lookAt(scene.position);
+
+    renderer.render(scene, camera);
+  }
+
+  if (!reduceMotion && window.WebGLRenderingContext) {
+    try { init(); } catch (e) { canvas.style.display = 'none'; }
+  } else {
+    canvas.style.display = 'none';
+  }
+})();
+
+window.__countdownPrefix = '⏳ se autodestruye en ';
+(function () {
+  var el = document.getElementById('hero-countdown');
+  var total = 60 * 60;
+  var remaining = total;
+  setInterval(function () {
+    remaining = remaining > 0 ? remaining - 1 : total;
+    var m = Math.floor(remaining / 60);
+    var s = remaining % 60;
+    el.textContent = window.__countdownPrefix + m + ':' + String(s).padStart(2, '0');
+  }, 1000);
+})();
+</script>
+
+<script>
+var I18N = {
+  es: {
+    'nav-why': 'Por qué', 'nav-features': 'Funcionalidades', 'nav-how': 'Cómo funciona',
+    'hero-eyebrow': 'Corre sobre cuentas temporales de Cloudflare',
+    'hero-title': 'Un sandbox que<br><span class="grad">se autodestruye solo.</span>',
+    'hero-sub': 'Un espacio efímero para que un <b>agente</b> ejecute JavaScript vía HTTP — aislado de verdad en un intérprete QuickJS compilado a WASM, con memoria persistente en D1. Sin login, sin Docker. <code>wrangler deploy --temporary</code> lo levanta en segundos y desaparece solo en ~1 hora.',
+    'hero-cta-ghost': 'Ver código en GitHub',
+    'countdown-prefix': '⏳ se autodestruye en ',
+    'why-tag': 'Por qué existe',
+    'why-title': 'Un agente necesita un lugar seguro para probar código',
+    'why-sub': 'Cloudflare bloquea eval/new Function en producción, y su alternativa oficial (Dynamic Workers) requiere plan pago. La única forma real de dar aislamiento en una cuenta gratuita/temporal es correr un intérprete completo compilado a WASM adentro del propio Worker.',
+    'why-c1-h': 'Cero fricción', 'why-c1-p': 'Sin crear cuenta, sin login, sin Docker. Un comando y tenés un endpoint HTTP listo para tu agente.',
+    'why-c2-h': 'Aislamiento real', 'why-c2-p': 'No es una lista negra de nombres bloqueados — el código corre en un QuickJS-WASM que directamente no tiene <code>fetch</code> ni acceso a los bindings del Worker.',
+    'why-c3-h': 'Se limpia solo', 'why-c3-p': 'Nada que recordar borrar. Pasada la hora, Cloudflare elimina la cuenta temporal y todo lo que contiene.',
+    'feat-tag': 'Funcionalidades',
+    'feat-title': 'Lo justo para que un agente ejecute y recuerde',
+    'feat-sub': 'API HTTP simple: una sesión por token, un Durable Object propio, y una D1 compartida para memoria.',
+    'feat-1-h': 'Ejecución aislada', 'feat-1-p': 'JavaScript corriendo dentro de QuickJS compilado a WASM, no vía eval del Worker.',
+    'feat-2-h': 'Sin red desde el código', 'feat-2-p': '<code>typeof fetch</code> adentro del sandbox devuelve <code>undefined</code> — no hay APIs de red para empezar.',
+    'feat-3-h': 'Protección contra loops infinitos', 'feat-3-p': 'Corta por pasos de intérprete, no por deadline — un <code>while(true){}</code> se corta en ~1-2 segundos.',
+    'feat-4-h': 'Historial por sesión', 'feat-4-p': 'Cada ejecución queda guardada en el SQLite propio de esa sesión — código, resultado, logs y errores.',
+    'feat-5-h': 'Memoria con D1', 'feat-5-p': 'Una base D1 real, auto-provisionada al desplegar, para que el agente guarde datos entre pasos y entre sesiones.',
+    'feat-6-h': 'API HTTP simple', 'feat-6-p': '<code>POST /new</code>, <code>POST /exec</code>, <code>POST /db/query</code> — nada que aprender, cualquier agente lo llama con fetch.',
+    'how-tag': 'Cómo funciona',
+    'how-title': 'De cero a ejecutando código en menos de un minuto',
+    'how-1-h': 'Cloná el repo', 'how-1-p': 'No hace falta tener cuenta de Cloudflare ni estar logueado.',
+    'how-2-h': 'Desplegá con --temporary', 'how-2-p': 'Wrangler crea una cuenta desechable, provisiona la D1 sola, despliega el Worker y te da la URL pública.',
+    'how-3-h': 'Creá una sesión y ejecutá', 'how-3-p': 'Tu agente hace <code>POST /new</code> una vez, y después <code>POST /s/&lt;token&gt;/exec</code> con el código a correr.',
+    'how-4-h': '¿Te gustó? Quedátelo', 'how-4-p': 'Wrangler también te da una <em>claim URL</em>. Abrila y logueate antes de que venza la hora y el Worker pasa a tu cuenta real, para siempre. Si no hacés nada, se borra solo.',
+    'uc-tag': 'Casos de uso',
+    'uc-title': '¿Para qué sirve esto en la práctica?',
+    'uc-1': 'Herramienta de ejecución de código para un LLM', 'uc-2': 'Probar snippets rápido sin instalar Node', 'uc-3': 'Ejecutar código generado por un agente de forma segura',
+    'uc-4': 'Calculadora aislada para razonamiento paso a paso', 'uc-5': 'Prototipar lógica antes de escribirla en el proyecto real', 'uc-6': 'Aprender Durable Objects + WebAssembly',
+    'foot-1': 'Repositorio', 'foot-2': 'Guía para agentes', 'foot-3': 'Docs: cuentas temporales', 'foot-4': 'Docs: Durable Objects',
+    'foot-note': 'No afiliado con Cloudflare. Hecho con <code>wrangler deploy --temporary</code>.',
+  },
+  en: {
+    'nav-why': 'Why', 'nav-features': 'Features', 'nav-how': 'How it works',
+    'hero-eyebrow': 'Runs on Cloudflare temporary accounts',
+    'hero-title': 'A sandbox that<br><span class="grad">self-destructs.</span>',
+    'hero-sub': 'An ephemeral space for an <b>agent</b> to execute JavaScript over HTTP — truly isolated in a QuickJS interpreter compiled to WASM, with persistent memory in D1. No login, no Docker. <code>wrangler deploy --temporary</code> spins it up in seconds and it disappears on its own in ~1 hour.',
+    'hero-cta-ghost': 'View code on GitHub',
+    'countdown-prefix': '⏳ self-destructs in ',
+    'why-tag': 'Why it exists',
+    'why-title': 'An agent needs a safe place to try out code',
+    'why-sub': 'Cloudflare blocks eval/new Function in production, and its official alternative (Dynamic Workers) requires a paid plan. The only real way to get isolation on a free/temporary account is to run a full interpreter compiled to WASM inside the Worker itself.',
+    'why-c1-h': 'Zero friction', 'why-c1-p': 'No account, no login, no Docker. One command and you have an HTTP endpoint ready for your agent.',
+    'why-c2-h': 'Real isolation', 'why-c2-p': 'Not a blocklist of names — the code runs in a QuickJS-WASM that simply doesn\'t have <code>fetch</code> or access to the Worker\'s bindings.',
+    'why-c3-h': 'Cleans up on its own', 'why-c3-p': 'Nothing to remember to delete. After the hour, Cloudflare removes the temporary account and everything in it.',
+    'feat-tag': 'Features',
+    'feat-title': 'Just enough for an agent to execute and remember',
+    'feat-sub': 'Simple HTTP API: one session per token, its own Durable Object, and a shared D1 for memory.',
+    'feat-1-h': 'Isolated execution', 'feat-1-p': 'JavaScript running inside QuickJS compiled to WASM, not via the Worker\'s own eval.',
+    'feat-2-h': 'No network from the code', 'feat-2-p': '<code>typeof fetch</code> inside the sandbox returns <code>undefined</code> — there are no network APIs to begin with.',
+    'feat-3-h': 'Infinite-loop protection', 'feat-3-p': 'Cuts off by interpreter steps, not deadline — a <code>while(true){}</code> gets cut in ~1-2 seconds.',
+    'feat-4-h': 'Per-session history', 'feat-4-p': 'Every execution is saved in that session\'s own SQLite — code, result, logs, and errors.',
+    'feat-5-h': 'Memory via D1', 'feat-5-p': 'A real D1 database, auto-provisioned on deploy, for the agent to store data across steps and sessions.',
+    'feat-6-h': 'Simple HTTP API', 'feat-6-p': '<code>POST /new</code>, <code>POST /exec</code>, <code>POST /db/query</code> — nothing to learn, any agent can call it with fetch.',
+    'how-tag': 'How it works',
+    'how-title': 'From zero to executing code in under a minute',
+    'how-1-h': 'Clone the repo', 'how-1-p': 'No Cloudflare account or login needed.',
+    'how-2-h': 'Deploy with --temporary', 'how-2-p': 'Wrangler creates a disposable account, auto-provisions D1, deploys the Worker, and gives you the public URL.',
+    'how-3-h': 'Create a session and execute', 'how-3-p': 'Your agent does <code>POST /new</code> once, then <code>POST /s/&lt;token&gt;/exec</code> with the code to run.',
+    'how-4-h': 'Like it? Keep it', 'how-4-p': 'Wrangler also gives you a <em>claim URL</em>. Open it and log in before the hour is up and the Worker moves to your real account, permanently. Do nothing, and it deletes itself.',
+    'uc-tag': 'Use cases',
+    'uc-title': 'What is this actually good for?',
+    'uc-1': 'Code execution tool for an LLM', 'uc-2': 'Quickly test snippets without installing Node', 'uc-3': 'Safely execute agent-generated code',
+    'uc-4': 'Isolated calculator for step-by-step reasoning', 'uc-5': 'Prototype logic before writing it in the real project', 'uc-6': 'Learn Durable Objects + WebAssembly',
+    'foot-1': 'Repository', 'foot-2': 'Agent guide', 'foot-3': 'Docs: temporary accounts', 'foot-4': 'Docs: Durable Objects',
+    'foot-note': 'Not affiliated with Cloudflare. Built with <code>wrangler deploy --temporary</code>.',
+  },
+  pt: {
+    'nav-why': 'Por quê', 'nav-features': 'Funcionalidades', 'nav-how': 'Como funciona',
+    'hero-eyebrow': 'Roda sobre contas temporárias da Cloudflare',
+    'hero-title': 'Um sandbox que<br><span class="grad">se autodestrói sozinho.</span>',
+    'hero-sub': 'Um espaço efêmero para que um <b>agente</b> execute JavaScript via HTTP — isolado de verdade num interpretador QuickJS compilado para WASM, com memória persistente em D1. Sem login, sem Docker. <code>wrangler deploy --temporary</code> sobe tudo em segundos e desaparece sozinho em ~1 hora.',
+    'hero-cta-ghost': 'Ver código no GitHub',
+    'countdown-prefix': '⏳ se autodestrói em ',
+    'why-tag': 'Por que existe',
+    'why-title': 'Um agente precisa de um lugar seguro para testar código',
+    'why-sub': 'A Cloudflare bloqueia eval/new Function em produção, e a alternativa oficial dela (Dynamic Workers) exige plano pago. A única forma real de ter isolamento numa conta gratuita/temporária é rodar um interpretador completo compilado para WASM dentro do próprio Worker.',
+    'why-c1-h': 'Zero fricção', 'why-c1-p': 'Sem criar conta, sem login, sem Docker. Um comando e você tem um endpoint HTTP pronto para seu agente.',
+    'why-c2-h': 'Isolamento real', 'why-c2-p': 'Não é uma lista negra de nomes — o código roda num QuickJS-WASM que simplesmente não tem <code>fetch</code> nem acesso aos bindings do Worker.',
+    'why-c3-h': 'Se limpa sozinho', 'why-c3-p': 'Nada para lembrar de apagar. Passada a hora, a Cloudflare remove a conta temporária e tudo que ela contém.',
+    'feat-tag': 'Funcionalidades',
+    'feat-title': 'O suficiente para um agente executar e lembrar',
+    'feat-sub': 'API HTTP simples: uma sessão por token, seu próprio Durable Object, e um D1 compartilhado para memória.',
+    'feat-1-h': 'Execução isolada', 'feat-1-p': 'JavaScript rodando dentro do QuickJS compilado para WASM, não via eval do Worker.',
+    'feat-2-h': 'Sem rede a partir do código', 'feat-2-p': '<code>typeof fetch</code> dentro do sandbox retorna <code>undefined</code> — não há APIs de rede para começar.',
+    'feat-3-h': 'Proteção contra loops infinitos', 'feat-3-p': 'Corta por passos do interpretador, não por prazo — um <code>while(true){}</code> é cortado em ~1-2 segundos.',
+    'feat-4-h': 'Histórico por sessão', 'feat-4-p': 'Cada execução fica salva no SQLite próprio daquela sessão — código, resultado, logs e erros.',
+    'feat-5-h': 'Memória com D1', 'feat-5-p': 'Um banco D1 de verdade, auto-provisionado ao implantar, para o agente guardar dados entre passos e sessões.',
+    'feat-6-h': 'API HTTP simples', 'feat-6-p': '<code>POST /new</code>, <code>POST /exec</code>, <code>POST /db/query</code> — nada para aprender, qualquer agente chama com fetch.',
+    'how-tag': 'Como funciona',
+    'how-title': 'Do zero a executar código em menos de um minuto',
+    'how-1-h': 'Clone o repositório', 'how-1-p': 'Não precisa de conta da Cloudflare nem estar logado.',
+    'how-2-h': 'Implante com --temporary', 'how-2-p': 'O Wrangler cria uma conta descartável, provisiona o D1 sozinho, implanta o Worker e te dá a URL pública.',
+    'how-3-h': 'Crie uma sessão e execute', 'how-3-p': 'Seu agente faz <code>POST /new</code> uma vez, e depois <code>POST /s/&lt;token&gt;/exec</code> com o código a rodar.',
+    'how-4-h': 'Gostou? Fique com ele', 'how-4-p': 'O Wrangler também te dá uma <em>claim URL</em>. Abra e faça login antes da hora acabar e o Worker passa para sua conta real, para sempre. Se não fizer nada, ele se apaga sozinho.',
+    'uc-tag': 'Casos de uso',
+    'uc-title': 'Para que isso serve na prática?',
+    'uc-1': 'Ferramenta de execução de código para um LLM', 'uc-2': 'Testar snippets rápido sem instalar Node', 'uc-3': 'Executar código gerado por um agente com segurança',
+    'uc-4': 'Calculadora isolada para raciocínio passo a passo', 'uc-5': 'Prototipar lógica antes de escrever no projeto real', 'uc-6': 'Aprender Durable Objects + WebAssembly',
+    'foot-1': 'Repositório', 'foot-2': 'Guia para agentes', 'foot-3': 'Docs: contas temporárias', 'foot-4': 'Docs: Durable Objects',
+    'foot-note': 'Não afiliado à Cloudflare. Feito com <code>wrangler deploy --temporary</code>.',
+  },
+};
+
+(function () {
+  function applyLang(lang) {
+    var dict = I18N[lang] || I18N.es;
+    Object.keys(dict).forEach(function (id) {
+      if (id === 'countdown-prefix') {
+        window.__countdownPrefix = dict[id];
+        return;
+      }
+      var el = document.getElementById(id);
+      if (el) el.innerHTML = dict[id];
+    });
+    document.documentElement.lang = lang;
+    document.querySelectorAll('.lang-btn').forEach(function (btn) {
+      btn.classList.toggle('active', btn.dataset.lang === lang);
+    });
+    localStorage.setItem('lang', lang);
+  }
+
+  function detectLang() {
+    var saved = localStorage.getItem('lang');
+    if (saved && I18N[saved]) return saved;
+    var nav = (navigator.language || 'es').toLowerCase();
+    if (nav.indexOf('en') === 0) return 'en';
+    if (nav.indexOf('pt') === 0) return 'pt';
+    return 'es';
+  }
+
+  document.querySelectorAll('.lang-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () { applyLang(btn.dataset.lang); });
+  });
+
+  applyLang(detectLang());
+})();
+</script>
+
+</body>
+</html>
