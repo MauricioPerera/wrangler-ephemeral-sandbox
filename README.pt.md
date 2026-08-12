@@ -2,9 +2,11 @@
 
 🌐 [Español](./README.md) · [English](./README.en.md) · **Português**
 
+🌐 **[Landing page](https://mauricioperera.github.io/wrangler-ephemeral-sandbox/)** — apresentação visual do projeto, disponível em español / English / português.
+
 Um espaço efêmero para que um **agente** execute JavaScript via HTTP — sem login, sem Docker, sem instalar nada — e que **se autodestrói sozinho** em ~1 hora. Pensado para ser chamado por código (um agente de IA usando como ferramenta), não para uso humano pelo navegador.
 
-Irmão de [wrangler-ephemeral-chat](https://github.com/MauricioPerera/wrangler-ephemeral-chat), [wrangler-ephemeral-whiteboard](https://github.com/MauricioPerera/wrangler-ephemeral-whiteboard) e [wrangler-ephemeral-airdrop](https://github.com/MauricioPerera/wrangler-ephemeral-airdrop) — mesma conta temporária da Cloudflare, mas para executar código em vez de conversar/desenhar/compartilhar arquivos.
+Irmão de [wrangler-ephemeral-chat](https://github.com/MauricioPerera/wrangler-ephemeral-chat) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-chat/)), [wrangler-ephemeral-whiteboard](https://github.com/MauricioPerera/wrangler-ephemeral-whiteboard) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-whiteboard/)) e [wrangler-ephemeral-airdrop](https://github.com/MauricioPerera/wrangler-ephemeral-airdrop) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-airdrop/)) — mesma conta temporária da Cloudflare, mas para executar código em vez de conversar/desenhar/compartilhar arquivos.
 
 ## Por que isso não é um `eval()` qualquer
 
