@@ -1,0 +1,14 @@
+{
+  "$schema": "https://developers.cloudflare.com/workers/wrangler/config-schema.json",
+  "name": "ephemeral-sandbox",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "SANDBOX", "class_name": "Sandbox" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Sandbox"] }
+  ]
+}
