@@ -233,7 +233,16 @@ curl -X POST $ORIGIN/s/&lt;token&gt;/exec \\
   -H "content-type: application/json" \\
   -d '{"code":"return 1 + 1"}'
 
-curl $ORIGIN/s/&lt;token&gt;/history</pre>
+curl $ORIGIN/s/&lt;token&gt;/history
+
+# D1 compartido por toda la cuenta (persiste entre sesiones)
+curl -X POST $ORIGIN/s/&lt;token&gt;/db/exec \\
+  -H "content-type: application/json" \\
+  -d '{"sql":"CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT)"}'
+
+curl -X POST $ORIGIN/s/&lt;token&gt;/db/query \\
+  -H "content-type: application/json" \\
+  -d '{"sql":"SELECT * FROM notes"}'</pre>
   </div>
 </div>
 <script>
@@ -358,24 +367,79 @@ return 21 * 2;</textarea>
 </html>`;
 }
 
+const MAX_SQL_LENGTH = 20000;
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
+}
+
+async function readSqlBody(request) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return { error: jsonResponse({ error: "Body inválido, se espera JSON con {sql}" }, 400) };
+  }
+  const sql = typeof body.sql === "string" ? body.sql : "";
+  if (!sql.trim()) return { error: jsonResponse({ error: "Falta 'sql' (string no vacío)" }, 400) };
+  if (sql.length > MAX_SQL_LENGTH) return { error: jsonResponse({ error: `SQL demasiado largo (máx ${MAX_SQL_LENGTH} caracteres)` }, 413) };
+  const params = Array.isArray(body.params) ? body.params : [];
+  return { sql, params };
+}
+
+// D1: una sola base compartida por toda la cuenta temporal (así es el límite
+// en cuentas --temporary, no una por sesión). No hay aislamiento automático
+// entre sesiones — el binding se expone completo, pensado para un único
+// agente dueño de todo el deploy, no para un servicio multi-tenant público.
+async function handleDbExec(request, env) {
+  const parsed = await readSqlBody(request);
+  if (parsed.error) return parsed.error;
+  try {
+    const stmt = parsed.params.length ? env.DB.prepare(parsed.sql).bind(...parsed.params) : env.DB.prepare(parsed.sql);
+    const result = await stmt.run();
+    return jsonResponse({ ok: true, meta: result.meta });
+  } catch (e) {
+    return jsonResponse({ ok: false, error: e && e.message ? e.message : String(e) }, 400);
+  }
+}
+
+async function handleDbQuery(request, env) {
+  const parsed = await readSqlBody(request);
+  if (parsed.error) return parsed.error;
+  try {
+    const stmt = parsed.params.length ? env.DB.prepare(parsed.sql).bind(...parsed.params) : env.DB.prepare(parsed.sql);
+    const result = await stmt.all();
+    return jsonResponse({ ok: true, results: result.results, meta: result.meta });
+  } catch (e) {
+    return jsonResponse({ ok: false, error: e && e.message ? e.message : String(e) }, 400);
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
     if (request.method === "POST" && url.pathname === "/new") {
       const token = crypto.randomUUID();
-      return new Response(JSON.stringify({ token, url: `${url.origin}/s/${token}`, execUrl: `${url.origin}/s/${token}/exec` }), {
-        headers: { "content-type": "application/json" },
+      return jsonResponse({
+        token,
+        url: `${url.origin}/s/${token}`,
+        execUrl: `${url.origin}/s/${token}/exec`,
+        dbExecUrl: `${url.origin}/s/${token}/db/exec`,
+        dbQueryUrl: `${url.origin}/s/${token}/db/query`,
       });
     }
 
-    const m = url.pathname.match(/^\/s\/([a-zA-Z0-9-]+)(?:\/(exec|history))?$/);
+    const m = url.pathname.match(/^\/s\/([a-zA-Z0-9-]+)(?:\/(exec|history|db\/exec|db\/query))?$/);
     if (m) {
       const token = m[1];
       const sub = m[2];
+
+      if (sub === "db/exec" && request.method === "POST") return handleDbExec(request, env);
+      if (sub === "db/query" && request.method === "POST") return handleDbQuery(request, env);
+
       const id = env.SANDBOX.idFromName(token);
       const stub = env.SANDBOX.get(id);
-
       if (sub === "exec") return stub.fetch("https://sandbox/exec", { method: "POST", body: request.body, headers: request.headers });
       if (sub === "history") return stub.fetch("https://sandbox/history");
       return new Response(sandboxPage(token), { headers: { "content-type": "text/html; charset=utf-8" } });

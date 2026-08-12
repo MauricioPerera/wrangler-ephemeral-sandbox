@@ -8,6 +8,9 @@
       { "name": "SANDBOX", "class_name": "Sandbox" }
     ]
   },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "ephemeral-sandbox-db" }
+  ],
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["Sandbox"] }
   ]

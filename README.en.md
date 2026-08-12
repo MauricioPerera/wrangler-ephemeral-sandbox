@@ -56,20 +56,44 @@ curl https://<worker>.<slug>.workers.dev/s/<token>/history
 
 The code executes as a function body — use `return` to produce a value. There's also an HTML page at `/s/<token>` for manual testing from the browser.
 
+## Database (D1) — memory across executions and sessions
+
+The JS sandbox has no persistence on its own (every `/exec` is a fresh context). For that there's a real D1 database, exposed as two separate HTTP endpoints (not inside the sandbox — D1 is async and QuickJS `RELEASE_SYNC` doesn't support async native functions, so it's called from outside):
+
+```bash
+# Mutations (CREATE/INSERT/UPDATE/DELETE)
+curl -X POST https://<worker>.<slug>.workers.dev/s/<token>/db/exec \
+  -H "content-type: application/json" \
+  -d '{"sql": "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT)"}'
+
+curl -X POST https://<worker>.<slug>.workers.dev/s/<token>/db/exec \
+  -H "content-type: application/json" \
+  -d '{"sql": "INSERT INTO notes (text) VALUES (?)", "params": ["something to remember"]}'
+
+# Queries (SELECT)
+curl -X POST https://<worker>.<slug>.workers.dev/s/<token>/db/query \
+  -H "content-type: application/json" \
+  -d '{"sql": "SELECT * FROM notes"}'
+# → {"ok":true,"results":[{"id":1,"text":"something to remember"}],...}
+```
+
+**Important**: it's **a single D1 database for the whole account** (that's the limit on `--temporary` accounts, not one per session) — verified: a new session (different `/new`) sees data saved by a previous session. There's no automatic isolation between sessions, no sanitization beyond using `params` with placeholders (`?`) — the binding is exposed in full, meant for a single agent that owns the whole deploy to use as its own memory, not for a public multi-tenant service.
+
 ## Limits (tested, not just theoretical)
 
 - **No real network access**: `typeof fetch` inside the sandbox returns `"undefined"` — this isn't a blocklist of names, the QuickJS environment simply doesn't have those APIs to begin with.
 - **Infinite-loop protection is step-based, not time-based**: `Date.now()` does not advance during a tight synchronous loop inside a Workers isolate, so a deadline-based limit (`shouldInterruptAfterDeadline`) never fires against a real `while(true){}` — confirmed empirically (it took 43s to stop, via Cloudflare's own CPU limit, not ours). The fix is counting interpreter interrupt-handler invocations instead (`MAX_INTERRUPT_CHECKS` in `src/index.js`, currently 5000) — an infinite loop cuts off in ~1-2 seconds, without affecting legitimate work (a 100,000-iteration `for` loop runs to completion fine).
 - **16MB of memory and 320KB of stack** per execution (configurable in `src/index.js`).
 - **20,000 character maximum** of code per execution.
-- **No variable persistence between executions**: each call to `/exec` is a fresh QuickJS context. If the agent needs state across steps, it has to resend the accumulated code.
+- **No JS variable persistence between executions**: each call to `/exec` is a fresh QuickJS context. To persist data across steps or sessions, use the `/db/exec` and `/db/query` endpoints (D1) — don't resend accumulated code.
+- **D1 is a shared database for the whole account**, not isolated per session (see section above).
 
 ## Structure
 
 ```
 src/index.js       — Worker + Durable Object (Sandbox) + HTML pages + QuickJS runtime
 src/quickjs.wasm   — QuickJS interpreter (release-sync variant) compiled to WASM
-wrangler.jsonc      — Worker config and Durable Object binding
+wrangler.jsonc      — Worker config, Durable Object binding, and D1 binding
 ```
 
 ## Are you an AI agent?
