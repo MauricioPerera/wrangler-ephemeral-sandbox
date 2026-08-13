@@ -2,6 +2,8 @@
 
 Este proyecto es, en sí mismo, una herramienta para que un agente ejecute código. Esta guía cubre dos cosas: cómo desplegarlo con `wrangler --temporary`, y cómo usarlo una vez desplegado.
 
+Si lo que el usuario necesita no es ejecutar código sino inspeccionar webhooks entrantes, usá el repo hermano [wrangler-ephemeral-webhook](https://github.com/MauricioPerera/wrangler-ephemeral-webhook/blob/master/AGENTS.md).
+
 ## Paso 1 — Confirmar que NO hay sesión activa
 
 ```bash
