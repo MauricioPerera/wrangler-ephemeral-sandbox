@@ -17,7 +17,7 @@ Duas abordagens foram tentadas antes de chegar nesta, e ambas **falham em contas
 
 **A solução que funciona de verdade**: empacotar um interpretador de JavaScript compilado para WebAssembly ([QuickJS](https://github.com/justjake/quickjs-emscripten)) dentro do próprio Worker. O código do agente roda *dentro* do WASM, não via `eval` do Worker — então a restrição da Cloudflare nem é ativada, e de brinde você ganha isolamento real: o código executado não tem `fetch`, não tem acesso aos bindings do Worker, não tem nada além do que injetamos explicitamente (`console`).
 
-Também é irmão de [wrangler-ephemeral-webhook](https://github.com/MauricioPerera/wrangler-ephemeral-webhook) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-webhook/)) — para inspecionar webhooks recebidos ao vivo.
+Também é irmão de [wrangler-ephemeral-webhook](https://github.com/MauricioPerera/wrangler-ephemeral-webhook) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-webhook/)) — para inspecionar webhooks recebidos ao vivo — e de [wrangler-ephemeral-voicememo](https://github.com/MauricioPerera/wrangler-ephemeral-voicememo) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-voicememo/)) — para gravar e compartilhar um memo de voz.
 
 ## Como funciona
 
