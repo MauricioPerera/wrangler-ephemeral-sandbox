@@ -17,6 +17,8 @@ Two approaches were tried before landing on this one, and both **fail on `--temp
 
 **What actually works**: bundling a JavaScript interpreter compiled to WebAssembly ([QuickJS](https://github.com/justjake/quickjs-emscripten)) inside the Worker itself. The agent's code runs *inside* the WASM, not via the Worker's own `eval` — so Cloudflare's restriction never triggers, and as a bonus you get real isolation: the executed code has no `fetch`, no access to the Worker's bindings, nothing except what we explicitly inject (`console`).
 
+Also a sibling of [wrangler-ephemeral-webhook](https://github.com/MauricioPerera/wrangler-ephemeral-webhook) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-webhook/)) — for inspecting incoming webhooks live.
+
 ## How it works
 
 - `wrangler deploy --temporary` creates a temporary Cloudflare account (no login) and deploys the Worker (~600KB, mostly the QuickJS WASM binary).
