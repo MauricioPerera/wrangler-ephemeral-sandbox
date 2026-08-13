@@ -8,6 +8,8 @@ Un espacio efímero para que un **agente** ejecute JavaScript vía HTTP — sin 
 
 Hermano de [wrangler-ephemeral-chat](https://github.com/MauricioPerera/wrangler-ephemeral-chat) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-chat/)), [wrangler-ephemeral-whiteboard](https://github.com/MauricioPerera/wrangler-ephemeral-whiteboard) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-whiteboard/)) y [wrangler-ephemeral-airdrop](https://github.com/MauricioPerera/wrangler-ephemeral-airdrop) ([landing page](https://mauricioperera.github.io/wrangler-ephemeral-airdrop/)) — misma cuenta temporal de Cloudflare, pero para ejecutar código en vez de chatear/dibujar/compartir archivos.
 
+¿Querés chat + pizarra + airdrop juntos, en un solo deploy? Mirá [wrangler-ephemeral-suite](https://github.com/MauricioPerera/wrangler-ephemeral-suite).
+
 ## Por qué no es un `eval()` cualquiera
 
 Se intentaron dos caminos antes de llegar a este, y ambos **fallan en cuentas `--temporary`** — vale la pena documentarlo porque no es obvio:
